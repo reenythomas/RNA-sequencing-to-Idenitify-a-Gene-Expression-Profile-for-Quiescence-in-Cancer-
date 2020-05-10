@@ -1,0 +1,340 @@
+---
+title: "R Notebook"
+output:
+  pdf_document: default
+  html_notebook: default
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Cmd+Shift+Enter*. 
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Cmd+Option+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Cmd+Shift+K* to preview the HTML file). 
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
+
+
+
+Read in data ; Taken from box alt analyze results
+```{r}
+
+########   READ MCF7 AND HT1080 DATA 
+
+MCF7data <- read.csv("~/Desktop/CAPSTONE/MCF7_data.csv", header = TRUE, sep = ",")
+MCF7data <- MCF7data[,-2]
+HT1080data <- read.csv("~/Desktop/CAPSTONE/HT1080_data.csv", header = TRUE, sep = ",")
+HT1080data <- HT1080data[,-2]
+HT1080data <- HT1080data[,-2]
+
+#######    MERGE DATASETS
+
+FUCCIDATA_merge <- merge(MCF7data, HT1080data, by = "Ensembl_gene", all.x = F, all.y = F)
+vector <- FUCCIDATA_merge[,1]
+rownames(FUCCIDATA_merge) <- vector
+FUCCIDATA_merge <- FUCCIDATA_merge[,-1]
+
+```
+
+BoxPlot of Pre-Normalized Data 
+```{r}
+boxplot(FUCCIDATA_merge)
+summary(FUCCIDATA_merge)
+```
+
+
+Quantile Normalization 
+```{r}
+
+library(preprocessCore)  # Initialize the preprocessCore library to use quantile normalize function 
+
+FUCCIDATA_mat <- as.matrix(FUCCIDATA_merge)
+norm_quant <- normalize.quantiles(FUCCIDATA_mat, copy = TRUE)
+norm_quant <- as.data.frame(norm_quant)
+row.names(norm_quant) <- vector
+colnames(norm_quant)<-colnames(FUCCIDATA_merge)
+
+###### Box plot of normalized data
+
+boxplot(norm_quant)
+summary(norm_quant) 
+```
+HGNC BioMart Annotation Extraction 
+```{r}
+### Gene Ontology
+### from Ensemble Biomart/Human transcript stable id 
+library(biomaRt)
+ensembl = useEnsembl(biomart="ensembl", dataset="hsapiens_gene_ensembl", GRCh =37)
+hgnc_ensemble <- getBM(attributes=c('ensembl_gene_id','ensembl_transcript_id','hgnc_symbol','description'), mart = ensembl)
+head(hgnc_ensemble)
+```
+
+
+MCF7 G0 & G1 data analysis
+```{r}
+
+MCF7norm2 <- norm_quant[,1:6]
+
+
+
+###### Ftest
+
+library(genefilter)
+factor1 <- factor(c(0,0,1,1,1,1))
+rowftestm2 <- rowFtests(as.matrix(MCF7norm2), factor1, var.equal = FALSE)
+rowftestm2 <- na.omit(rowftestm2)
+SIGrowftestm2 <- rowftestm2[rowftestm2$p.value<0.05,]
+
+library(dplyr)
+SIGrowftestm2 <- tibble::rownames_to_column(SIGrowftestm2, "ensembl_gene_id")
+
+#### Calculate Row Means
+
+MCF7norm2$AveG0 = rowMeans(MCF7norm2[,1:2])
+MCF7norm2$AveG1 = rowMeans(MCF7norm2[,3:6])
+
+
+#Compute Log differences
+MCF7norm2$"AveG0-AveG1" <- (as.numeric(as.character(MCF7norm2$AveG0)))-(as.numeric(as.character(MCF7norm2$AveG1)))
+
+#Computing Fold Change
+MCF7norm2$"FoldChangeG0G1"<-ifelse(MCF7norm2$`AveG0-AveG1`< 0,1/2^MCF7norm2$
+                                  `AveG0-AveG1`*-1,2^MCF7norm2$`AveG0-AveG1`)
+
+
+### Merge wih significant p-value data frame
+
+MCF7norm2 <- tibble::rownames_to_column(MCF7norm2, "ensembl_gene_id")
+
+MCF7norm2 <- merge(MCF7norm2, SIGrowftestm2, by = "ensembl_gene_id", all.x = F, all.y = F)
+
+MCF7norm2 <- merge(MCF7norm2, hgnc_ensemble, by = "ensembl_gene_id", all.x = F, all.y = F)
+
+
+MCF7norm_01_upreg2 <- MCF7norm2[MCF7norm2$FoldChangeG0G1>1.2,]
+MCF7norm_01_downreg2 <- MCF7norm2[MCF7norm2$FoldChangeG0G1<-1.2,]
+
+
+
+```
+
+MCF7  data analysis 
+```{r}
+MCF7norm <- norm_quant[,1:10]
+
+###### Ftest
+
+library(genefilter)
+factor1 <- factor(c(0,0,1,1,1,1,2,2,2,2))
+rowftestm <- rowFtests(as.matrix(MCF7norm), factor1, var.equal = FALSE)
+rowftestm <- na.omit(rowftestm)
+SIGrowftestm <- rowftestm[rowftestm$p.value<0.05,]
+
+library(dplyr)
+SIGrowftestm <- tibble::rownames_to_column(SIGrowftestm, "ensembl_gene_id")
+
+#### Calculate Row Means
+
+MCF7norm$AveG0 = rowMeans(MCF7norm[,1:2])
+MCF7norm$AveG1 = rowMeans(MCF7norm[,3:6])
+MCF7norm$AveG2 = rowMeans(MCF7norm[,7:10])
+
+#Compute Log differences
+MCF7norm$"AveG0-AveG1" <- (as.numeric(as.character(MCF7norm$AveG0)))-(as.numeric(as.character(MCF7norm$AveG1)))
+MCF7norm$"AveG1-AveG2" <- (as.numeric(as.character(MCF7norm$AveG1)))-(as.numeric(as.character(MCF7norm$AveG2)))
+MCF7norm$"AveG0-AveG2" <- (as.numeric(as.character(MCF7norm$AveG0)))-(as.numeric(as.character(MCF7norm$AveG2)))
+
+#Computing Fold Change
+MCF7norm$"FoldChangeG0G1"<-ifelse(MCF7norm$`AveG0-AveG1`< 0,1/2^MCF7norm$
+                                  `AveG0-AveG1`*-1,2^MCF7norm$`AveG0-AveG1`)
+MCF7norm$"FoldChangeG1G2"<-ifelse(MCF7norm$`AveG1-AveG2`< 0,1/2^MCF7norm$
+                                      `AveG1-AveG2`*-1,2^MCF7norm$`AveG1-AveG2`)
+MCF7norm$"FoldChangeG0G2"<-ifelse(MCF7norm$`AveG0-AveG2`< 0,1/2^MCF7norm$
+                                      `AveG0-AveG2`*-1,2^MCF7norm$`AveG0-AveG2`)
+
+### Merge wih significant p-value data frame
+
+MCF7norm <- tibble::rownames_to_column(MCF7norm, "ensembl_gene_id")
+
+MCF7norm <- merge(MCF7norm, SIGrowftestm, by = "ensembl_gene_id", all.x = F, all.y = F)
+
+MCF7norm <- merge(MCF7norm, hgnc_ensemble, by = "ensembl_gene_id", all.x = F, all.y = F)
+
+
+MCF7norm_01_upreg <- MCF7norm[MCF7norm$FoldChangeG0G1>1.2,]
+MCF7norm_01_downreg <- MCF7norm[MCF7norm$FoldChangeG0G1<-1.2,]
+
+MCF7norm_02_upreg <- MCF7norm[MCF7norm$FoldChangeG0G2>1.2,]
+MCF7norm_02_downreg <- MCF7norm[MCF7norm$FoldChangeG0G2<-1.2,]
+
+MCF7norm_12_upreg <- MCF7norm[MCF7norm$FoldChangeG1G2>1.2,]
+MCF7norm_12_downpreg <- MCF7norm[MCF7norm$FoldChangeG1G2<-1.2,]
+
+
+
+
+```
+
+HT1080 G0 and G1 Analysis
+```{r}
+HT1080norm2 <- norm_quant[,c(11:14,19:22)]
+
+###### Ftest
+
+library(genefilter)
+factor3 <- factor(c(0,0,0,0,1,1,1,1))
+rowftesth2 <- rowFtests(as.matrix(HT1080norm2), factor3, var.equal = FALSE)
+rowftesth2 <- na.omit(rowftesth2)
+SIGrowftesth2 <- rowftesth2[rowftesth2$p.value<0.05,]
+
+library(dplyr)
+SIGrowftesth2 <- tibble::rownames_to_column(SIGrowftesth2, "ensembl_gene_id")
+
+#### Calculate Row Means
+
+HT1080norm2$AveG0 = rowMeans(HT1080norm2[,1:4])
+HT1080norm2$AveG1 = rowMeans(HT1080norm2[,5:8])
+
+
+#Compute Log differences
+HT1080norm2$"AveG0-AveG1" <- (as.numeric(as.character(HT1080norm2$AveG0)))-(as.numeric(as.character(HT1080norm2$AveG1)))
+
+
+#Computing Fold Change
+HT1080norm2$"FoldChangeG0G1"<-ifelse(HT1080norm2$`AveG0-AveG1`< 0,1/2^HT1080norm2$
+                                  `AveG0-AveG1`*-1,2^HT1080norm2$`AveG0-AveG1`)
+
+
+### Merge wih significant p-value data frame
+
+HT1080norm2 <- tibble::rownames_to_column(HT1080norm2, "ensembl_gene_id")
+
+HT1080norm2 <- merge(HT1080norm2, SIGrowftesth2, by = "ensembl_gene_id", all.x = F, all.y = F)
+
+HT1080norm2 <- merge(HT1080norm2, hgnc_ensemble, by = "ensembl_gene_id", all.x = F, all.y = F)
+
+
+HT1080norm_01_upreg2 <- HT1080norm2[HT1080norm2$FoldChangeG0G1>1.2,]
+HT1080norm_01_downreg2 <- HT1080norm2[HT1080norm2$FoldChangeG0G1<-1.2,]
+
+
+
+
+```
+
+
+
+HT1080 data analysis
+```{r}
+HT1080norm <- norm_quant[,11:22]
+
+###### Ftest
+
+library(genefilter)
+factor2 <- factor(c(0,0,0,0,1,1,1,1,2,2,2,2))
+rowftesth <- rowFtests(as.matrix(HT1080norm), factor2, var.equal = FALSE)
+rowftesth <- na.omit(rowftesth)
+SIGrowftesth <- rowftesth[rowftesth$p.value<0.05,]
+
+library(dplyr)
+SIGrowftesth <- tibble::rownames_to_column(SIGrowftesth, "ensembl_gene_id")
+
+#### Calculate Row Means
+
+HT1080norm$AveG0 = rowMeans(HT1080norm[,1:4])
+HT1080norm$AveG1 = rowMeans(HT1080norm[,5:8])
+HT1080norm$AveG2 = rowMeans(HT1080norm[,9:12])
+
+#Compute Log differences
+HT1080norm$"AveG0-AveG1" <- (as.numeric(as.character(HT1080norm$AveG0)))-(as.numeric(as.character(HT1080norm$AveG1)))
+HT1080norm$"AveG1-AveG2" <- (as.numeric(as.character(HT1080norm$AveG1)))-(as.numeric(as.character(HT1080norm$AveG2)))
+HT1080norm$"AveG0-AveG2" <- (as.numeric(as.character(HT1080norm$AveG0)))-(as.numeric(as.character(HT1080norm$AveG2)))
+
+#Computing Fold Change
+HT1080norm$"FoldChangeG0G1"<-ifelse(HT1080norm$`AveG0-AveG1`< 0,1/2^HT1080norm$
+                                  `AveG0-AveG1`*-1,2^HT1080norm$`AveG0-AveG1`)
+HT1080norm$"FoldChangeG1G2"<-ifelse(HT1080norm$`AveG1-AveG2`< 0,1/2^HT1080norm$
+                                      `AveG1-AveG2`*-1,2^HT1080norm$`AveG1-AveG2`)
+HT1080norm$"FoldChangeG0G2"<-ifelse(HT1080norm$`AveG0-AveG2`< 0,1/2^HT1080norm$
+                                      `AveG0-AveG2`*-1,2^HT1080norm$`AveG0-AveG2`)
+
+### Merge wih significant p-value data frame
+
+HT1080norm <- tibble::rownames_to_column(HT1080norm, "ensembl_gene_id")
+
+HT1080norm <- merge(HT1080norm, SIGrowftesth, by = "ensembl_gene_id", all.x = F, all.y = F)
+
+HT1080norm <- merge(HT1080norm, hgnc_ensemble, by = "ensembl_gene_id", all.x = F, all.y = F)
+
+
+HT1080norm_01_upreg <- HT1080norm[HT1080norm$FoldChangeG0G1>1.2,]
+HT1080norm_01_downreg <- HT1080norm[HT1080norm$FoldChangeG0G1<-1.2,]
+
+HT1080norm_02_upreg <- HT1080norm[HT1080norm$FoldChangeG0G2>1.2,]
+HT1080norm_02_downreg <- HT1080norm[HT1080norm$FoldChangeG0G2<-1.2,]
+
+HT1080norm_12_upreg <- HT1080norm[HT1080norm$FoldChangeG1G2>1.2,]
+HT1080norm_12_downpreg <- HT1080norm[HT1080norm$FoldChangeG1G2<-1.2,]
+
+
+
+
+```
+
+Overlap between MCF7 and HT1080 (G0 and G1 only analysis)
+```{r}
+MH_01_overlap_upreg2 <- merge(HT1080norm_01_upreg2, MCF7norm_01_upreg2, by = "ensembl_transcript_id", all.x = F, all.y = F)
+write.csv(MH_01_overlap_upreg2, "~/Desktop/CAPSTONE/Overlap_Genes/MH_01_overlap_upreg2.csv")
+
+
+MH_01_overlap_downreg2 <- merge(HT1080norm_01_downreg2, MCF7norm_01_downreg2, by = "ensembl_transcript_id", all.x = F, all.y = F)
+
+write.csv(MH_01_overlap_downreg2, "~/Desktop/CAPSTONE/Overlap_Genes/MH_01_overlap_downreg2.csv")
+
+```
+
+
+Overlap between MCF7 and HT1080
+
+```{r}
+MH_01_overlap_upreg <- merge(HT1080norm_01_upreg, MCF7norm_01_upreg, by = "ensembl_transcript_id", all.x = F, all.y = F)
+
+MH_01_overlap_downreg <- merge(HT1080norm_01_downreg, MCF7norm_01_downreg, by = "ensembl_transcript_id", all.x = F, all.y = F)
+
+MH_02_overlap_upreg <- merge(HT1080norm_02_upreg, MCF7norm_02_upreg, by = "ensembl_transcript_id", all.x = F, all.y = F)
+
+MH_02_overlap_downreg <- merge(HT1080norm_02_downreg, MCF7norm_02_downreg, by = "ensembl_transcript_id", all.x = F, all.y = F)
+
+MH_12_overlap_upreg <- merge(HT1080norm_12_upreg, MCF7norm_12_upreg, by = "ensembl_transcript_id", all.x = F, all.y = F)
+
+MH_12_overlap_downreg <- merge(HT1080norm_12_downpreg, MCF7norm_12_downpreg, by = "ensembl_transcript_id", all.x = F, all.y = F)
+
+
+```
+
+
+```
+
+```{r}
+MH_01_overlap_upreg <- merge(hgnc_ensemble, MH_01_overlap_upreg, by = "ensembl_transcript_id", all.x = F, all.y = F)
+write.csv(MH_01_overlap_upreg, "~/Desktop/CAPSTONE/Overlap_Genes/MH_01_overlap_upreg.csv")
+
+MH_01_overlap_downreg <- merge(hgnc_ensemble, MH_01_overlap_downreg, by = "ensembl_transcript_id", all.x = F, all.y = F)
+write.csv(MH_01_overlap_downreg, "~/Desktop/CAPSTONE/Overlap_Genes/MH_01_overlap_downreg.csv")
+
+MH_02_overlap_upreg <- merge(hgnc_ensemble, MH_02_overlap_upreg, by = "ensembl_transcript_id", all.x = F, all.y = F)
+write.csv(MH_02_overlap_upreg, "~/Desktop/CAPSTONE/Overlap_Genes/MH_02_overlap_upreg.csv/")
+
+MH_02_overlap_downreg <- merge(hgnc_ensemble, MH_02_overlap_downreg, by = "ensembl_transcript_id", all.x = F, all.y = F)
+write.csv(MH_02_overlap_downreg, "~/Desktop/CAPSTONE/Overlap_Genes/MH_02_overlap_downreg.csv/")
+
+MH_12_overlap_upreg <- merge(hgnc_ensemble, MH_12_overlap_upreg, by = "ensembl_transcript_id", all.x = F, all.y = F)
+write.csv(MH_12_overlap_upreg, "~/Desktop/CAPSTONE/Overlap_Genes/MH_12_overlap_upreg.csv/")
+
+MH_12_overlap_downreg <- merge(hgnc_ensemble, MH_12_overlap_downreg, by = "ensembl_transcript_id", all.x = F, all.y = F)
+write.csv(MH_12_overlap_downreg, "~/Desktop/CAPSTONE/Overlap_Genes/MH_01_overlap_downreg.csv/")
+
+
+```
+
