@@ -1,0 +1,257 @@
+---
+title: "Ki67p-FUCCI Analysis MCF7 Cells"
+output:
+  html_document:
+    df_print: paged
+  html_notebook: default
+  pdf_document: default
+  word_document: default
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+
+Reeny please use and share your R Notebook at our weekly meetings.
+
+Paste the code below for importing TPM values from Kallisto for how your shellscript analyzed the files in kallisto but comment it out so it does not run everytime you knit this report and udate it.
+
+Write the methods section (just a few senetences here...)
+
+
+```{bash}
+#insert code but comment out so does not run
+```
+P
+aste code below for looping and renaming TPM extracting TPM only into a dataframe and exporting to a datatable
+
+```{r}
+#comment out so does not run but have record
+
+library(dplyr)
+
+dir_kallisto = "~/Desktop/CAPSTONE/KALLISTO/AbundanceFiles"
+
+
+#make a list of sample names by reading the folder output names form callisto
+Samplenames = list.files(dir_kallisto)
+
+
+####################################################################################
+#initialize a dataframe by reading the ensembl IDs as a character for one
+####################################################################################
+#initialize the i variable for looping and import only the ensembl ids for
+library(tidyverse)
+
+i=1
+HRNAseqTPM<-read_tsv(paste(dir_kallisto,"/",Samplenames[i] ,sep = ""),
+                col_types = cols_only(target_id = 'c'))
+
+
+
+for (i in 1:length(Samplenames)) {
+  tsv<-read_tsv(paste(dir_kallisto,"/",Samplenames[i],sep = ""))
+  colnames(tsv)[5]<-paste(Samplenames[i],"-tpm",sep="")
+  HRNAseqTPM<-inner_join(HRNAseqTPM,tsv,by = "target_id")
+}
+rm(tsv)
+HRNAseqTPM = select(HRNAseqTPM, matches("tpm|id"))
+write.table(HRNAseqTPM, file = "HRNAseqTPM.txt", sep = "\t")
+```
+Paste code below for importing datatable (start here)
+
+```{r}
+
+library (plyr)
+HRNAseqTPM <- as.data.frame(HRNAseqTPM)
+vector <- HRNAseqTPM[,1]
+rownames(HRNAseqTPM) <- vector
+HRNAseqTPM <- HRNAseqTPM[,-1]
+HRNAseqTPM <- rename(HRNAseqTPM, c("H0R1.tsv-tpm"="H0R1","H0R2.tsv-tpm"="H0R2", "H0R3.tsv-tpm"="H0R3", "H0R4.tsv-tpm"="H0R4", "H1R1.tsv-tpm"="H1R1", "H1R2.tsv-tpm"="H1R2", "H1R3.tsv-tpm"="H1R3", "H1R4.tsv-tpm"="H1R4", "H2R1.tsv-tpm"="H2R1", "H2R3.tsv-tpm"="H2R2", "H2R4.tsv-tpm"="H2R3" ))
+
+```
+
+Paste the code below for log transforming and filtering all the data something along the lines of
+
+```{r}
+
+HRNAseqTPM[HRNAseqTPM <= 1] <- 1
+HRNAseqTPM <- log2(HRNAseqTPM)
+HRNAseqTPM$AveTpm= rowMeans(HRNAseqTPM)
+filterHRNATPM <- as.data.frame(HRNAseqTPM[HRNAseqTPM$AveTpm>0.0,])
+filterHRNATPM <- (filterHRNATPM[,-12])
+HRNAseqTPM <- (HRNAseqTPM[,-12])
+
+## Pushing rownames back to column in HRNAseqTPM
+#HRNAseqTPM <- tibble::rownames_to_column(HRNAseqTPM, var = "ensembl_transcript_id" )
+
+```
+
+Paste the code below and analyze box plots of each logged sample across the study
+
+```{r}
+boxplot(filterHRNATPM)
+summary(filterHRNATPM) 
+```
+
+Paste below the code for PCA Analysis 
+```{r}
+library(devtools)
+library(ggbiplot)
+library(ggfortify)
+library(ggplot2)
+tfilterHRNATPM <- t(filterHRNATPM)
+
+pr <- prcomp(tfilterHRNATPM)
+print(pr)
+plot(pr, type = "l")
+plot(pr$x[,1:2])
+
+autoplot(pr, label = TRUE, label.size = 3)
+
+#g <- ggbiplot(pr, obs.scale =1, var.scale =1,ellipse = TRUE, circle = TRUE) + theme(legend.direction = 'horizontal', legend.position = 'top')
+#print(g)
+
+```
+
+
+Run Clustering By Array!
+```{r}
+
+##clustering tranform the matrix using t function then produce a euclidean distance and then us hclust
+#see ALS in class activyt 
+library(gplots)
+e<- dist(tfilterHRNATPM, method = "euclidean", diag = FALSE, upper = FALSE, p = 2)
+x<- hclust(e, method = "complete", members = NULL)
+plot(x, labels = NULL, hang = 0.1, check = TRUE,
+     axes = TRUE, frame.plot = FALSE, ann = TRUE,
+     main = "Cluster Dendrogram",
+     sub = NULL, xlab = NULL, ylab = "Height")
+
+```
+
+Run an Ftest
+```{r}
+#Paste the code below for an Ftest
+
+library(genefilter)
+factor1 <- factor(c(0,0,0,0,1,1,1,1,2,2,2))
+rowftest <- rowFtests(as.matrix(HRNAseqTPM), factor1, var.equal = FALSE)
+rowftest <- na.omit(rowftest)
+rowftest <- tibble::rownames_to_column(rowftest, var = "ensembl_transcript_id" )
+rowftest$ensembl_transcript_id <- substr(rowftest$ensembl_transcript_id,1,nchar(rowftest$ensembl_transcript_id)-3)
+
+```
+
+
+
+Extract Annotation from Ensemble
+```{r}
+### Gene Ontology
+### from Ensemble Biomart/Human transcript stable id 
+library(biomaRt)
+ensembl = useEnsembl(biomart="ensembl", dataset="hsapiens_gene_ensembl", GRCh =37)
+hgnc_ensemble <- getBM(attributes=c('ensembl_gene_id','ensembl_transcript_id','hgnc_symbol','description'), mart = ensembl)
+head(hgnc_ensemble)
+```
+
+Paste code below for running group averages fold changes and pairwise ttests for G0 v G1, G1 v G2 and G0 v G2
+```{r}
+
+### DIFFERENTIAL ANALYSIS on G0, G1 & G2
+
+#Comupte the AVG of control group and normal
+library(stringr)
+library(data.table)
+#filterHRNATPM <- tibble::rownames_to_column(filterHRNATPM, var = "ensembl_transcript_id" )
+HRNAseqTPM <- tibble::rownames_to_column(HRNAseqTPM, var = "ensembl_transcript_id" )
+HRNAseqTPM$ensembl_transcript_id <- substr(HRNAseqTPM$ensembl_transcript_id,1,nchar(HRNAseqTPM$ensembl_transcript_id)-3)
+TPMvalues <- merge(hgnc_ensemble,HRNAseqTPM, by = "ensembl_transcript_id", all.x = F, all.y = F)
+
+##HRNAseqTPM$AveTpm= rowMeans(HRNAseqTPM)
+
+TPMvalues$AveG0 = rowMeans(TPMvalues[,5:8])
+TPMvalues$AveG1 = rowMeans(TPMvalues[,9:12])
+TPMvalues$AveG2 = rowMeans(TPMvalues[,13:15])
+
+#Compute Log differences
+TPMvalues$"AveG0-AveG1" <- (as.numeric(as.character(TPMvalues$AveG0)))-(as.numeric(as.character(TPMvalues$AveG1)))
+TPMvalues$"AveG1-AveG2" <- (as.numeric(as.character(TPMvalues$AveG1)))-(as.numeric(as.character(TPMvalues$AveG2)))
+TPMvalues$"AveG0-AveG2" <- (as.numeric(as.character(TPMvalues$AveG0)))-(as.numeric(as.character(TPMvalues$AveG2)))
+
+#Computing Fold Change
+TPMvalues$"FoldChangeG0G1"<-ifelse(TPMvalues$`AveG0-AveG1`< 0,1/2^TPMvalues$
+                                  `AveG0-AveG1`*-1,2^TPMvalues$`AveG0-AveG1`)
+TPMvalues$"FoldChangeG1G2"<-ifelse(TPMvalues$`AveG1-AveG2`< 0,1/2^TPMvalues$
+                                      `AveG1-AveG2`*-1,2^TPMvalues$`AveG1-AveG2`)
+TPMvalues$"FoldChangeG0G2"<-ifelse(TPMvalues$`AveG0-AveG2`< 0,1/2^TPMvalues$
+                                      `AveG0-AveG2`*-1,2^TPMvalues$`AveG0-AveG2`)
+
+## Merge RowFtest
+
+TPMvalues <- merge(TPMvalues, rowftest, by = "ensembl_transcript_id", all.x = F, all.y = F)
+
+### Clean and Sort TPMValue
+
+TPMvalues <- TPMvalues[-c(16,17,18,19,20,21)]
+DATAFRAMES01 = cbind(TPMvalues[,1:12], TPMvalues$FoldChangeG0G1, TPMvalues[,19:20])
+DATAFRAMES12 = cbind(TPMvalues[,1:4], TPMvalues[,9:15], TPMvalues$FoldChangeG1G2, TPMvalues[,19:20])
+DATAFRAMES02 = cbind(TPMvalues[,1:8], TPMvalues[,13:15], TPMvalues[,18:20])
+
+
+
+upreg01 <- as.data.frame(DATAFRAMES01[DATAFRAMES01$p.value<=0.05 & DATAFRAMES01$`TPMvalues$FoldChangeG0G1`>1.2,])
+upreg01 <- na.omit(upreg01)
+
+downreg01 <-as.data.frame((DATAFRAMES01[DATAFRAMES01$p.value<=0.05 & DATAFRAMES01$`TPMvalues$FoldChangeG0G1`< (-1.2),]))
+downreg01 <- na.omit(downreg01)
+
+upreg12 <- as.data.frame(DATAFRAMES12[DATAFRAMES12$p.value<=0.05 & DATAFRAMES12$`TPMvalues$FoldChangeG1G2`>1.2,])
+upreg12 <- na.omit(upreg12)
+
+downreg12 <-as.data.frame((DATAFRAMES12[DATAFRAMES12$p.value<=0.05 & DATAFRAMES12$`TPMvalues$FoldChangeG1G2`< (-1.2),]))
+downreg12 <- na.omit(downreg12)
+
+upreg02 <- as.data.frame(DATAFRAMES02[DATAFRAMES02$p.value<=0.05 & DATAFRAMES02$FoldChangeG0G2>1.2,])
+upreg02 <- na.omit(upreg02)
+
+downreg02 <-as.data.frame((DATAFRAMES02[DATAFRAMES02$p.value<=0.05 & DATAFRAMES02$FoldChangeG0G2< (-1.2),]))
+downreg02 <- na.omit(downreg02)
+
+
+```
+
+
+Heat Map Generation 
+```{r}
+library(pheatmap)
+pheatmap(t(upreg01[,c(2:9)]), show_colnames = TRUE, treeheight_row = 0, treeheight_col = 0, fontsize_row = 7, cluster_rows = FALSE, filename = "heatmapupreg01.png")
+pheatmap(t(downreg01[,c(2:9)]), show_colnames = TRUE, treeheight_row = 0, treeheight_col = 0, fontsize_row = 7, cluster_rows = FALSE, filename = "heatmapdownreg01.png")
+
+pheatmap(t(upreg12[,c(6:12)]), show_colnames = TRUE, treeheight_row = 0, treeheight_col = 0, fontsize_row = 7, cluster_rows = FALSE, filename = "heatmapupreg12.png")
+pheatmap(t(downreg12[,c(6:12)]), show_colnames = TRUE, treeheight_row = 0, treeheight_col = 0, fontsize_row = 7, cluster_rows = FALSE, filename = "heatmapdownreg12.png")
+
+pheatmap(t(upreg02[,c(2:5,10:12)]), show_colnames = TRUE, treeheight_row = 0, treeheight_col = 0, fontsize_row = 7, cluster_rows = FALSE, filename = "heatmapupreg02.png")
+pheatmap(t(downreg02[,c(2:5,10:12)]), show_colnames = TRUE, treeheight_row = 0, treeheight_col = 0, fontsize_row = 7, cluster_rows = FALSE, filename = "heatmapdownreg02.png")
+
+```
+
+GOseq
+```{r}
+## Format DE genes into a vector
+library(goseq)
+
+genes=as.logical(p.adjust(DATAFRAMES01$p.value[DATAFRAMES01$`TPMvalues$FoldChangeG0G1`!=0],method = "BH")<0.5)
+names(genes) = make.names(DATAFRAMES01$ensembl_gene_id[DATAFRAMES01$`TPMvalues$FoldChangeG0G1`!=0], unique = TRUE)
+genes = genes[!is.na(genes)]
+table(genes)
+
+## Generate Pwf 
+
+pwf=nullp(genes, "hg19", "ensGene")
+
+## Wallenius Approximation 
+GO.wall=goseq(pwf, "hg19", "ensGene", use_genes_without_cat = TRUE)
+head
+```
+
